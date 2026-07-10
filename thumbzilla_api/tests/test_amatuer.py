@@ -13,7 +13,7 @@ async def test_all():
     async for video in amateur.get_videos():
         idx += 1
 
-        assert isinstance(video.title, str)
+        assert isinstance(video.video.title, str)
 
         if idx >= 3:
             break

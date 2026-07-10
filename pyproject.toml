@@ -3,32 +3,49 @@ requires = ["uv_build>=0.9.18,<0.10.0"]
 build-backend = "uv_build"
 
 [project]
-name = "thumbzilla_api"
-version = "1.0"
-description = "An API for thumbzilla.com"
+name = "unofficial-api-for-thumbzilla"
+version = "1.1"
+description = "An asynchronous API wrapper and scraper for thumbzilla.com"
 authors = [
   {name = "EchterAlsFake", email = "EchterAlsFake@proton.me"}
 ]
 requires-python = ">=3.12"
 license = "LGPL-3.0-only"
 license-files = ["LICENSE"]
-keywords = ["thumbzilla", "phub", "porn", "api", "web scrapper", "api wrapper"]
+keywords = [
+    "api",
+    "scraper",
+    "async",
+    "asyncio",
+    "video-downloader",
+    "selectolax",
+    "curl-cffi",
+    "thumbzilla"
+]
 classifiers = [
-  "Programming Language :: Python"
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Multimedia :: Video"
 ]
 dependencies = [
-  "eaf_base_api",
+  "eaf-base-api",
   "m3u8",
-  "bs4",
+  "selectolax",
 ]
 
 [project.optional-dependencies]
-av = ["av; python_version >= '3.10'"]
-full = ["lxml"] # LXML for faster parsing speed, though optional :)
+av = ["av"]
 
 [project.urls]
-Documentation = "https://github.com/EchterAlsFake/API_Docs/blob/master/Porn_APIs/thumbzilla.md"
-Repository = "https://github.com/EchterAlsFake/thumbzilla_api"
+Homepage = "https://github.com/EchterAlsFake/unofficial-api-for-thumbzilla"
+Repository = "https://github.com/EchterAlsFake/unofficial-api-for-thumbzilla"
+"Bug Tracker" = "https://github.com/EchterAlsFake/unofficial-api-for-thumbzilla/issues"
 
 [tool.uv.build-backend]
 module-name = "thumbzilla_api"

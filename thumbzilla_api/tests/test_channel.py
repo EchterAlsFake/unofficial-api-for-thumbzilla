@@ -14,7 +14,7 @@ async def test_all():
     idx = 0
     async for video in channel.get_videos():
         idx += 1
-        assert isinstance(video.title, str) and len(video.title) > 0
+        assert isinstance(video.video.title, str) and len(video.video.title) > 0
 
         if idx >= 3:
             break

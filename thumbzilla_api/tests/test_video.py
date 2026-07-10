@@ -1,5 +1,7 @@
 import pytest
+
 from thumbzilla_api import Client
+from base_api import DownloadConfigHLS
 
 
 @pytest.mark.asyncio
@@ -14,5 +16,6 @@ async def test_all():
     assert isinstance(video.thumbnail, str) and len(video.thumbnail) > 0
     assert isinstance(video.author_name, str) and len(video.author_name) > 0
 
-    stuff = await video.download(quality="worst", return_report=True)
+    config = DownloadConfigHLS(quality="best", return_report=True)
+    stuff = await video.download(config)
     assert stuff.status == "completed"

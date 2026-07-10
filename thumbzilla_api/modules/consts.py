@@ -1,12 +1,6 @@
-from bs4 import BeautifulSoup
-
-try:
-    import lxml
-    parser = "lxml" # Faster speeds, but more dependencies
-
-except (ModuleNotFoundError, ImportError):
-    parser = "html.parser" # Fallback to classic HTML parser (will work fine)
-
+import logging
+from curl_cffi import Response
+from selectolax.lexbor import LexborHTMLParser
 
 HEADERS = {
     'Accept': '*/*',
@@ -23,42 +17,96 @@ COOKIES = {
     'platform': 'pc'
 }
 
+# Set up logging configuration
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-def extractor_html(html_content: str) -> list:
-    video_urls = []
-    soup = BeautifulSoup(html_content, parser)
-    stuff = soup.find("ul", class_="videos_grid")
-    videos = stuff.find_all("a", class_="video_link tm_video_link js_wrap_trigger_login js_mpop js-pop")
 
-    for video in videos:
-        link = video.get("href")
-        video_urls.append(f"https://www.redtube.com{link}")
+def get_text_safe(node, selector):
+    """Safely extract and strip text from a CSS selector."""
+    target = node.css_first(selector)
+    if target:
+        text = target.text(strip=True)
+        return text if text else None
+    return None
 
-    return video_urls
+
+def get_attr_safe(node, selector, attr):
+    """Safely extract an attribute from a CSS selector."""
+    target = node.css_first(selector) if selector else node
+    if target and target.attributes:
+        val = target.attributes.get(attr)
+        return val if val else None
+    return None
 
 
 def extractor_search(html_content: str) -> list:
-    video_urls = []
-    soup = BeautifulSoup(html_content, parser)
-    stuff = soup.find("div", class_="searchResults full-row-thumbs js_video_row tm_search_result_videos")
-    videos = stuff.find_all("article", class_="video-box pc js_video-box js-pop")
-
-    for video in videos:
-        link = video.find("a").get("href")
-        video_urls.append(f"https://www.thumbzilla.com{link}")
-
-    return video_urls
+    """
+    Extracts comprehensive video attributes from HTML search results.
+    Returns a list of dictionaries.
+    """
+    if isinstance(html_content, Response):
+        print(f"Status: {html_content.status_code}")
 
 
-def extractor_pornstars(html_content: str) -> list:
-    video_urls = []
-    soup = BeautifulSoup(html_content, parser)
-    stuff = soup.find("div", class_="full-row-thumbs")
-    videos = stuff.find_all("article", class_="video-box pc js_video-box js-pop")
+    results = []
+    parser = LexborHTMLParser(html_content)
 
-    for video in videos:
-        link = video.find("a").get("href")
-        video_urls.append(f"https://www.thumbzilla.com{link}")
+    # 1. Locate the main container gracefully
+    stuff = parser.css_first("div.searchResults.full-row-thumbs.js_video_row.tm_search_result_videos")
+    if not stuff:
+        stuff = parser.css_first("div.full-row-thumbs")
+    if not stuff:
+        stuff = parser.css_first("ul.videos_grid")
 
-    return video_urls
+    if not stuff:
+        logger.error("Main video container not found in HTML. Aborting extraction.")
+        return results
 
+    # 2. Locate the video boxes
+    videos = stuff.css("article.video-box.pc.js_video-box.js-pop")
+    if not videos:
+        videos = stuff.css("a.video_link.tm_video_link.js_wrap_trigger_login.js_mpop.js-pop")
+
+    if not videos:
+        logger.warning("Container found, but no video elements were matched inside.")
+        return results
+    # 3. Iterate and Extract
+    for index, video in enumerate(videos, start=1):
+        # Base extraction using data-attributes (most reliable) and falling back to text/children
+        video_data = {
+            "video_id": get_attr_safe(video, None, "data-video-id"),
+            "title": get_attr_safe(video, None, "aria-label") or get_text_safe(video, ".video-title-text span"),
+            "video_url": get_attr_safe(video, "a", "href"),
+            "duration": get_text_safe(video, ".video-duration span"),
+            "author_name": get_attr_safe(video, None, "data-uploader-name") or get_text_safe(video,
+                                                                                               ".author-title-text"),
+            "uploader_url": get_attr_safe(video, ".author-title-text", "href"),
+            "thumbnail": get_attr_safe(video, "img.thumb-image", "data-src") or get_attr_safe(video,
+                                                                                                  "img.thumb-image",
+                                                                                                  "src"),
+            "preview_video_url": get_attr_safe(video, "img.thumb-image", "data-mediabook"),
+        }
+
+        # Extract the list of performers separately
+        performer_nodes = video.css(".channel-performer")
+        performers = [p.text(strip=True) for p in performer_nodes] if performer_nodes else []
+        video_data["performers"] = performers if performers else None
+        # Clean up and validate specific fields
+
+        if video_data["video_url"]:
+            video_data["url"] = f"https://www.thumbzilla.com{video_data['video_url']}"
+
+        # 4. Handle Edge Cases & Logging
+        missing_attrs = [key for key, value in video_data.items() if value is None]
+        video_data.pop("video_url")
+        if missing_attrs:
+            # Create a useful identifier for the log (use video_id if it exists, else the loop index)
+            identifier = video_data.get('video_id') or f"Index #{index}"
+            logger.warning(f"Video [{identifier}] is missing attributes: {', '.join(missing_attrs)}")
+        results.append(video_data)
+
+    return results
