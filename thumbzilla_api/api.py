@@ -1,24 +1,10 @@
-"""
-Copyright (C) 2026 Johannes Habel
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
 from __future__ import annotations
 import os
 import re
+import copy
 import json
 import asyncio
+import logging
 
 from typing import AsyncGenerator
 from dataclasses import dataclass, fields
@@ -33,9 +19,10 @@ from thumbzilla_api.modules.errors import (NotFound, ProxyError, NetworkError, U
 from thumbzilla_api.modules.consts import HEADERS, COOKIES, extractor_search
 from thumbzilla_api.modules.type_hints import on_error_hint
 
+logger = logging.getLogger("Thumbzilla API")
 
 async def on_error(url: str, error: Exception, attempt: int) -> bool:
-    print(f"URL: {url}, ERROR: {error}, Attempt: {attempt}")
+    logger.warning(f"URL: {url}, ERROR: {error}, Attempt: {attempt}")
 
     if isinstance(error, ResourceGone):
         return False
@@ -96,7 +83,7 @@ class Video(BaseMedia):
         html_content = await get_html_content(url=self.url, core=self.core)
         assert isinstance(html_content, str)
         data: dict = await asyncio.to_thread(self._extract_html, html_content)
-        allowed_fields = [field.name for field in fields(self)]
+        allowed_fields = {field.name for field in fields(self)}
 
         for key, value in data.items():
             if key in allowed_fields:
@@ -188,9 +175,8 @@ class Video(BaseMedia):
         return "\n".join(m3u8_lines)
 
     async def download(self, configuration: DownloadConfigHLS) -> bool | DownloadReport:
-        config = configuration
+        config = copy.deepcopy(configuration)
         config.m3u8_base_url = self.m3u8_base_url
-
 
         if not config.no_title:
             config.path = os.path.join(config.path, f"{self.title}.mp4")
@@ -221,7 +207,7 @@ class Playlist(BaseMedia):
         html_content = await get_html_content(url=self.url, core=self.core)
         assert isinstance(html_content, str)
         data: dict = await asyncio.to_thread(self._extract_html, html_content)
-        allowed_fields = [field.name for field in fields(self)]
+        allowed_fields = {field.name for field in fields(self)}
 
         for key, value in data.items():
             if key in allowed_fields:
@@ -254,8 +240,9 @@ class Playlist(BaseMedia):
                      on_page_error: on_error_hint = None,
                      keep_original_order: bool = False,
                      load_html: bool = False) -> AsyncGenerator[ScrapeResult, None]:
+        url = self.url
         helper = Helper(core=self.core, constructor=Video)
-        page_urls = [f"{self.url}&page={page}" for page in range(1, pages + 1)]
+        page_urls = [f"{url}&page={page}" for page in range(1, pages + 1)]
         videos_concurrency = videos_concurrency or self.core.configuration.videos_concurrency
         pages_concurrency = pages_concurrency or self.core.configuration.pages_concurrency
         assert videos_concurrency and pages_concurrency
@@ -280,7 +267,7 @@ class UserHelper(BaseMedia):
         html_content = await get_html_content(core=self.core, url=self.url)
         assert isinstance(html_content, str)
         data: dict = await asyncio.to_thread(self._extract_html, html_content)
-        allowed_fields = [field.name for field in fields(self)]
+        allowed_fields = {field.name for field in fields(self)}
 
         for key, value in data.items():
             if key in allowed_fields:
@@ -309,7 +296,8 @@ class UserHelper(BaseMedia):
                          ) -> AsyncGenerator[ScrapeResult, None]:
 
         helper = Helper(core=self.core, constructor=Video)
-        page_urls = [f"{self.url}?page={page}" for page in range(1, pages + 1)]
+        url = self.url
+        page_urls = [f"{url}?page={page}" for page in range(1, pages + 1)]
         videos_concurrency = videos_concurrency or self.core.configuration.videos_concurrency
         pages_concurrency = pages_concurrency or self.core.configuration.pages_concurrency
         assert videos_concurrency and pages_concurrency
@@ -363,7 +351,7 @@ class Channel(UserHelper):
         html_content = await get_html_content(core=self.core, url=self.url)
         assert isinstance(html_content, str)
         data: dict = await asyncio.to_thread(self._extract_html, html_content)
-        allowed_fields = [field.name for field in fields(self)]
+        allowed_fields = {field.name for field in fields(self)}
         for key, value in data.items():
             if key in allowed_fields:
                 setattr(self, key, value)

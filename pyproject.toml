@@ -46,6 +46,9 @@ av = ["av"]
 Homepage = "https://github.com/EchterAlsFake/unofficial-api-for-thumbzilla"
 Repository = "https://github.com/EchterAlsFake/unofficial-api-for-thumbzilla"
 "Bug Tracker" = "https://github.com/EchterAlsFake/unofficial-api-for-thumbzilla/issues"
+"Support me on Ko-Fi" = "https://ko-fi.com/EchterAlsFake"
+"Donate via PayPal" = "https://paypal.me/EchterAlsFake"
+"Donate via Crypto" = "https://nowpayments.io/donation/EchterAlsFake"
 
 [tool.uv.build-backend]
 module-name = "thumbzilla_api"
