@@ -1,5 +1,4 @@
 import logging
-from curl_cffi import Response
 from selectolax.lexbor import LexborHTMLParser
 
 HEADERS = {
@@ -48,10 +47,6 @@ def extractor_search(html_content: str) -> list:
     Extracts comprehensive video attributes from HTML search results.
     Returns a list of dictionaries.
     """
-    if isinstance(html_content, Response):
-        print(f"Status: {html_content.status_code}")
-
-
     results = []
     parser = LexborHTMLParser(html_content)
 
@@ -107,6 +102,7 @@ def extractor_search(html_content: str) -> list:
             # Create a useful identifier for the log (use video_id if it exists, else the loop index)
             identifier = video_data.get('video_id') or f"Index #{index}"
             logger.warning(f"Video [{identifier}] is missing attributes: {', '.join(missing_attrs)}")
-        results.append(video_data)
+        if video_data.get("url"):
+            results.append(video_data)
 
     return results
