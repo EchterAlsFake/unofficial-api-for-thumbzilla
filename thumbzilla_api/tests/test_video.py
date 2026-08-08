@@ -1,8 +1,10 @@
+import os
 import pytest
 
 from thumbzilla_api import Client
 from base_api import DownloadConfigHLS
 
+DOWNLOAD_MODE = int(os.environ.get("DOWNLOAD_MODE", 2))
 
 @pytest.mark.asyncio
 async def test_all():
@@ -16,6 +18,12 @@ async def test_all():
     assert isinstance(video.thumbnail, str) and len(video.thumbnail) > 0
     assert isinstance(video.author_name, str) and len(video.author_name) > 0
 
-    config = DownloadConfigHLS(quality="worst", return_report=True)
-    stuff = await video.download(config)
-    assert stuff.status == "completed"
+    if DOWNLOAD_MODE == 1:
+        config = DownloadConfigHLS(quality="worst", return_report=True)
+        stuff = await video.download(config)
+        assert stuff.status == "completed"
+    else:
+        await video.load_fields("m3u8_base_url")
+        segments = await video.core.get_segments(m3u8_url_master=video.m3u8_base_url, quality="worst")
+        assert isinstance(segments, list)
+        assert len(segments) > 0
