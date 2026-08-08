@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "unofficial-api-for-thumbzilla"
-version = "1.2"
+version = "1.3"
 description = "An asynchronous API wrapper and scraper for thumbzilla.com"
 authors = [
   {name = "EchterAlsFake", email = "EchterAlsFake@proton.me"}
@@ -54,3 +54,6 @@ Repository = "https://github.com/EchterAlsFake/unofficial-api-for-thumbzilla"
 [tool.uv.build-backend]
 module-name = "thumbzilla_api"
 module-root = ""
+
+[tool.uv.sources]
+eaf-base-api = { path = "../eaf_base_api", editable = true }
