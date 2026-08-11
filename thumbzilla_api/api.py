@@ -13,7 +13,7 @@ from selectolax.lexbor import LexborHTMLParser
 from base_api.modules.config import IteratorConfig
 from base_api.modules.type_hints import DownloadReport
 from base_api import (BaseCore, BaseMedia, DownloadConfigHLS, ErrorAction, ErrorMode, Helper,
-    MediaLoadError, MediaLoadErrors, RetryPolicy, ScrapeErrorContext, ScrapeResult, media_field,
+    MediaLoadError, MediaLoadErrors, ScrapeErrorContext, ScrapeResult, media_field,
 )
 from base_api.modules.errors import (BotProtectionDetected, HTTPStatusError, InvalidProxy, NetworkRequestError,
                                      ResourceGone, UnknownError,
@@ -28,8 +28,8 @@ logger = logging.getLogger("Thumbzilla API")
 def make_iterator_config():
     return IteratorConfig(
         load_specific_sources=("html",),
-        item_retry=RetryPolicy(max_attempts=3),
-        page_retry=RetryPolicy(max_attempts=3),
+        item_retry=None,
+        page_retry=None,
         page_error_mode=ErrorMode.SKIP,
         item_error_handler=None,
         page_error_handler=None,
@@ -249,7 +249,7 @@ class Playlist(BaseMedia):
             "videos_count": video_count
         }
 
-    async def get_videos(self, pages: int = 2, iterator_config: IteratorConfig | None = None )-> AsyncGenerator[ScrapeResult, None]:
+    async def get_videos(self, pages: int = 2, iterator_config: IteratorConfig | None = None )-> AsyncGenerator[ScrapeResult[Video], None]:
         url = self.url
         helper = Helper(core=self.core, constructor=Video)
         page_urls = [f"{url}&page={page}" for page in range(1, pages + 1)]
@@ -293,7 +293,7 @@ class UserHelper(BaseMedia):
         }
 
     async def get_videos(self, pages: int = 2,
-                         iterator_configuration: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult, None]:
+                         iterator_configuration: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult[Video], None]:
 
         helper = Helper(core=self.core, constructor=Video)
         url = self.url
@@ -412,7 +412,7 @@ class Client:
             self,
             query: str,
             pages: int = 2,
-            iterator_configuration: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult, None]:
+            iterator_configuration: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult[Video], None]:
 
         helper = Helper(core=self.core, constructor=Video)
         page_urls = [f"https://thumbzilla.com/search/?query={query}&page={page}" for page in range(1, pages + 1)]
