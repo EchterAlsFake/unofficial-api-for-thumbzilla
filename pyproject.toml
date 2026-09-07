@@ -51,6 +51,12 @@ Repository = "https://github.com/EchterAlsFake/unofficial-api-for-thumbzilla"
 "Donate via PayPal" = "https://paypal.me/EchterAlsFake"
 "Donate via Crypto" = "https://nowpayments.io/donation/EchterAlsFake"
 
+[project.scripts]
+thumbzilla_api = "thumbzilla_api.api:main"
+
 [tool.uv.build-backend]
 module-name = "thumbzilla_api"
 module-root = ""
+
+[tool.uv.sources]
+eaf-base-api = { path = "../eaf_base_api", editable = true }

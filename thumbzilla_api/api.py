@@ -5,6 +5,9 @@ import copy
 import json
 import asyncio
 import logging
+import argparse
+
+from base_api.modules.static_functions import str_to_bool
 
 from dataclasses import dataclass
 from curl_cffi import AsyncSession
@@ -14,6 +17,7 @@ from base_api.modules.config import IteratorConfig
 from base_api.modules.type_hints import DownloadReport
 from base_api import (BaseCore, BaseMedia, DownloadConfigHLS, ErrorAction, ErrorMode, Helper,
     MediaLoadError, MediaLoadErrors, ScrapeErrorContext, ScrapeResult, media_field,
+    make_iterator_config, is_resource_gone, default_on_error, scrape_stream, build_m3u8_master,
 )
 from base_api.modules.errors import (BotProtectionDetected, HTTPStatusError, InvalidProxy, NetworkRequestError,
                                      ResourceGone, UnknownError,
@@ -25,39 +29,8 @@ from thumbzilla_api.modules.consts import HEADERS, COOKIES, extractor_search
 logger = logging.getLogger("Thumbzilla API")
 
 
-def make_iterator_config():
-    return IteratorConfig(
-        load_specific_sources=("html",),
-        item_retry=None,
-        page_retry=None,
-        page_error_mode=ErrorMode.SKIP,
-        item_error_handler=None,
-        page_error_handler=None,
-    )
-
-
-def _contains_resource_gone(error: BaseException) -> bool:
-    if isinstance(error, ResourceGone):
-        return True
-    if isinstance(error, MediaLoadError):
-        return _contains_resource_gone(error.original_error)
-    if isinstance(error, MediaLoadErrors):
-        return any(_contains_resource_gone(item) for item in error.errors)
-    return False
-
-
-async def on_error(context: ScrapeErrorContext) -> ErrorAction:
-    logger.warning(
-        "URL: %s, ERROR: %s, Attempt: %s",
-        context.url,
-        context.error,
-        context.attempt,
-    )
-
-    if _contains_resource_gone(context.error):
-        return ErrorAction.SKIP
-
-    return ErrorAction.RETRY
+_contains_resource_gone = is_resource_gone
+on_error = default_on_error
 
 
 async def get_html_content(core: BaseCore, url: str) -> str:
@@ -156,46 +129,8 @@ class Video(BaseMedia):
     @staticmethod
     def get_m3u8_base_url(stuff) -> str | None:
         """Convenience property to quickly get the main HLS adaptive stream path."""
-        data = json.loads(stuff)
+        return build_m3u8_master(stuff)
 
-        m3u8_lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
-
-        for stream in data:
-            quality = stream.get("quality", "unknown")
-            width = stream.get("width", 720)
-            height = stream.get("height", 404)
-            url = stream.get("videoUrl", "")
-
-            if not url:
-                continue
-
-            # Rough bandwidth estimation based on standard stream naming conventions
-            # (e.g., 4000K = 4,000,000 bps, 2000K = 2,000,000 bps)
-            # If '1080P_4000K' is in the URL, we use 4000000. Default to a sensible fallback.
-            bandwidth = 4000000
-            if "4000K" in url:
-                bandwidth = 4000000
-            elif "2000K" in url:
-                bandwidth = 2000000
-            elif "1000K" in url:
-                bandwidth = 1000000
-
-            # Adjust dimensions safely if height changes per quality
-            # Your JSON snippet showed height 404 for all, but typically:
-            stream_height = int(quality) if quality.isdigit() else height
-            # Rough 16:9 aspect ratio calculation for width if it's dynamic
-            stream_width = int(stream_height * (16 / 9)) if quality.isdigit() else width
-
-            # Append the stream info tag with attributes
-            m3u8_lines.append(
-                f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},'
-                f'RESOLUTION={stream_width}x{stream_height},'
-                f'NAME="{quality}p"'
-            )
-            # The line immediately following the tag must be the URI
-            m3u8_lines.append(url)
-
-        return "\n".join(m3u8_lines)
 
     async def download(self, configuration: DownloadConfigHLS) -> bool | DownloadReport:
         await self.load_fields("title", "m3u8_base_url")
@@ -249,22 +184,16 @@ class Playlist(BaseMedia):
             "videos_count": video_count
         }
 
-    async def get_videos(self, pages: int = 2, iterator_config: IteratorConfig | None = None )-> AsyncGenerator[ScrapeResult[Video], None]:
+    def get_videos(self, pages: int = 2, iterator_config: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult[Video], None]:
         url = self.url
-        helper = Helper(core=self.core, constructor=Video)
         page_urls = [f"{url}&page={page}" for page in range(1, pages + 1)]
-
-        if not iterator_config:
-            iterator_config = make_iterator_config()
-
-        stream = helper.iterator(
+        return scrape_stream(
+            core=self.core,
+            constructor=Video,
             target_page_urls=page_urls,
             item_extractor=extractor_search,
-            iterator_config=iterator_config)
-
-        async with stream:
-            async for result in stream:
-                yield result
+            iterator_config=iterator_config,
+        )
 
 
 @dataclass(kw_only=True, slots=True)
@@ -292,25 +221,20 @@ class UserHelper(BaseMedia):
             "name": name,
         }
 
-    async def get_videos(self, pages: int = 2,
+    def get_videos(self, pages: int = 2,
+                         iterator_config: IteratorConfig | None = None,
                          iterator_configuration: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult[Video], None]:
-
-        helper = Helper(core=self.core, constructor=Video)
+        config = iterator_config or iterator_configuration
         url = self.url
         page_urls = [f"{url}?page={page}" for page in range(1, pages + 1)]
-
-        if not iterator_configuration:
-            iterator_configuration = make_iterator_config()
-
-        stream = helper.iterator(
+        return scrape_stream(
+            core=self.core,
+            constructor=Video,
             target_page_urls=page_urls,
             item_extractor=extractor_search,
-            iterator_config=iterator_configuration
+            iterator_config=config,
         )
 
-        async with stream:
-            async for result in stream:
-                yield result
 
 
 @dataclass(kw_only=True, slots=True)
@@ -371,7 +295,9 @@ class Channel(UserHelper):
 
 
 class Client:
-    def __init__(self, core: BaseCore = BaseCore()):
+    def __init__(self, core: BaseCore | None = None):
+        if core is None:
+            core = BaseCore()
         self.core = core
         self.core.initialize_session()
         assert isinstance(self.core.session, AsyncSession)
@@ -408,25 +334,72 @@ class Client:
             await amateur.load_sources("html")
         return amateur
 
-    async def search(
+    def search(
             self,
             query: str,
             pages: int = 2,
+            iterator_config: IteratorConfig | None = None,
             iterator_configuration: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult[Video], None]:
-
-        helper = Helper(core=self.core, constructor=Video)
+        config = iterator_config or iterator_configuration
         page_urls = [f"https://thumbzilla.com/search/?query={query}&page={page}" for page in range(1, pages + 1)]
-
-        # Construct IteratorConfig passing the optional overrides directly
-        if not iterator_configuration:
-            iterator_configuration = make_iterator_config()
-
-        stream = helper.iterator(
+        return scrape_stream(
+            core=self.core,
+            constructor=Video,
             target_page_urls=page_urls,
             item_extractor=extractor_search,
-            iterator_config=iterator_configuration
+            iterator_config=config,
         )
 
-        async with stream:
-            async for result in stream:
-                yield result
+
+
+def create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Thumbzilla API Command Line Interface")
+    parser.add_argument("--download", metavar="URL", type=str, help="URL to download from")
+    parser.add_argument("--quality", metavar="best|half|worst", type=str, default="best", help="The video quality (best, half, worst)")
+    parser.add_argument("--file", metavar="FILE", type=str, help="(Optional) Specify a file with URLs (separated with new lines)")
+    parser.add_argument("--output", metavar="DIR", type=str, required=True, help="The output path (with filename or directory)")
+    parser.add_argument("--no-title", metavar="True,False", type=str, nargs="?", const="True", default="False",
+                        help="Whether to apply video title automatically to output path or not")
+    return parser
+
+
+async def run_main(args_list: list[str] | None = None):
+    parser = create_parser()
+    args = parser.parse_args(args_list)
+    no_title = str_to_bool(args.no_title) if isinstance(args.no_title, str) else bool(args.no_title)
+    config = DownloadConfigHLS(quality=args.quality, path=args.output, no_title=no_title)
+
+    urls: list[str] = []
+    if args.download:
+        urls.append(args.download)
+    if args.file:
+        with open(args.file, "r") as f:
+            urls.extend([line.strip() for line in f if line.strip()])
+
+    if not urls:
+        parser.print_help()
+        return
+
+    client = Client()
+    for url in urls:
+        print(f"Fetching video information for: {url}")
+        try:
+            video = await client.get_video(url, load_html=True)
+            title = getattr(video, "title", None) or url
+            print(f"Starting download for: {title}")
+            await video.download(configuration=config)
+            print(f"Download complete: {title}")
+        except Exception as e:
+            print(f"Error downloading {url}: {e}")
+
+
+def main():
+    try:
+        asyncio.run(run_main())
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user.")
+
+
+if __name__ == "__main__":
+    main()
+

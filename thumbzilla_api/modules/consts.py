@@ -24,22 +24,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def get_text_safe(node, selector):
-    """Safely extract and strip text from a CSS selector."""
-    target = node.css_first(selector)
-    if target:
-        text = target.text(strip=True)
-        return text if text else None
-    return None
+from base_api import get_text_safe, get_attr_safe
 
-
-def get_attr_safe(node, selector, attr):
-    """Safely extract an attribute from a CSS selector."""
-    target = node.css_first(selector) if selector else node
-    if target and target.attributes:
-        val = target.attributes.get(attr)
-        return val if val else None
-    return None
 
 
 def extractor_search(html_content: str) -> list:

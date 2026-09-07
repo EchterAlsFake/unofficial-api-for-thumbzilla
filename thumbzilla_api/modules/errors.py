@@ -1,28 +1,18 @@
-class NotFound(Exception):
-    def __init__(self, msg: str):
-        self.msg = msg
+from base_api.modules.errors import (
+    NotFound,
+    NetworkError,
+    BotDetection,
+    ProxyError,
+    UnknownNetworkError,
+    DownloadFailed,
+)
 
+__all__ = [
+    "NotFound",
+    "NetworkError",
+    "BotDetection",
+    "ProxyError",
+    "UnknownNetworkError",
+    "DownloadFailed",
+]
 
-class NetworkError(Exception):
-    def __init__(self, msg: str):
-        self.msg = msg
-
-
-class BotDetection(Exception):
-    def __init__(self, msg: str):
-        self.msg = msg
-
-
-class ProxyError(Exception):
-    def __init__(self, msg: str):
-        self.msg = msg
-
-
-class UnknownNetworkError(Exception):
-    def __init__(self, msg):
-        self.msg = msg
-
-
-class DownloadFailed(Exception):
-    def __init__(self, msg: str):
-        self.msg = msg
