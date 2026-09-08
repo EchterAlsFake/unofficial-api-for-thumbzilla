@@ -16,12 +16,8 @@ COOKIES = {
     'platform': 'pc'
 }
 
-# Set up logging configuration
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 from base_api import get_text_safe, get_attr_safe
@@ -44,8 +40,8 @@ def extractor_search(html_content: str) -> list:
         stuff = parser.css_first("ul.videos_grid")
 
     if not stuff:
-        logger.error("Main video container not found in HTML. Aborting extraction.")
-        return results
+        # Helper logs this extraction failure with the page URL and traceback.
+        raise ValueError("Main video container not found in Thumbzilla HTML")
 
     # 2. Locate the video boxes
     videos = stuff.css("article.video-box.pc.js_video-box.js-pop")
@@ -87,7 +83,7 @@ def extractor_search(html_content: str) -> list:
         if missing_attrs:
             # Create a useful identifier for the log (use video_id if it exists, else the loop index)
             identifier = video_data.get('video_id') or f"Index #{index}"
-            logger.warning(f"Video [{identifier}] is missing attributes: {', '.join(missing_attrs)}")
+            logger.warning("Video %s (%s) is missing attributes: %s", identifier, video_data.get("url"), ', '.join(missing_attrs))
         if video_data.get("url"):
             results.append(video_data)
 
