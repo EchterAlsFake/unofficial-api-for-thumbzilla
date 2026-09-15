@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "unofficial-api-for-thumbzilla"
-version = "1.4"
+version = "1.4.1"
 description = "An asynchronous API wrapper and scraper for thumbzilla.com"
 authors = [
   {name = "EchterAlsFake", email = "EchterAlsFake@proton.me"}
