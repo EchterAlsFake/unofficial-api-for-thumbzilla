@@ -34,7 +34,7 @@ classifiers = [
     "Topic :: Multimedia :: Video"
 ]
 dependencies = [
-  "eaf-base-api>=4.0.0",
+  "eaf-base-api>=4.2.0",
   "curl-cffi",
   "m3u8",
   "selectolax",

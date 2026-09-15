@@ -1,14 +1,14 @@
 from __future__ import annotations
-import os
 import re
-import copy
 import json
 import asyncio
 import logging
 import argparse
 import urllib.parse
 
-from base_api.modules.logger import configure_app_logging
+from thumbzilla_api.modules import errors as provider_errors
+from base_api.modules.provider import fetch_content, download_errors, download_hls
+from base_api.modules.logger import configure_app_logging, get_logger
 
 from base_api.modules.static_functions import str_to_bool
 
@@ -23,49 +23,20 @@ from base_api import (BaseCore, BaseMedia, DownloadConfigHLS, ErrorAction, Error
     make_iterator_config, is_resource_gone, default_on_error, scrape_stream, build_m3u8_master,
     parse_duration,
 )
-from base_api.modules.errors import (DownloadCancelled, BotProtectionDetected, HTTPStatusError, InvalidProxy, NetworkRequestError,
-                                     ResourceGone, UnknownError,
-)
 from thumbzilla_api.modules.errors import (NotFound, ProxyError, NetworkError, UnknownNetworkError, BotDetection,
                                            DownloadFailed)
 from thumbzilla_api.modules.consts import HEADERS, COOKIES, extractor_search
 
-logger = logging.getLogger("Thumbzilla API")
+logger = get_logger(__name__)
 
 
 _contains_resource_gone = is_resource_gone
 on_error = default_on_error
 
 
-async def get_html_content(core: BaseCore, url: str) -> str:
-    try:
-        return await core.fetch_text(url)
-
-    except HTTPStatusError as e:
-        logger.exception("Request failed for %s: %s", url, e)
-        if e.status_code == 404:
-            raise NotFound(f"Server returned 404 for: {url}") from e
-        raise NetworkError(f"Request failed for {url}: {e}") from e
-
-    except NetworkRequestError as e:
-        logger.exception("Request failed for %s: %s", url, e)
-        raise NetworkError(f"Request failed for {url}: {e}") from e
-
-    except InvalidProxy as e:
-        logger.exception("Request failed for %s: %s", url, e)
-        raise ProxyError(f"Request failed for {url}: {e}") from e
-
-    except BotProtectionDetected as e:
-        logger.exception("Request failed for %s: %s", url, e)
-        raise BotDetection(f"Request failed for {url}: {e}") from e
-
-    except UnknownError as e:
-        logger.exception("Request failed for %s: %s", url, e)
-        raise UnknownNetworkError(f"Request failed for {url}: {e}") from e
-
-    except Exception:
-        logger.exception("Failed to fetch or decode response for %s", url)
-        raise
+async def get_html_content(core: BaseCore, url: str, *, owner=None) -> str:
+    return await fetch_content(core, url, logger=logger, owner=owner,
+                               error_types=provider_errors)
 
 @dataclass(kw_only=True, slots=True)
 class Video(BaseMedia):
@@ -98,7 +69,7 @@ class Video(BaseMedia):
     )
 
     async def _load_html(self) -> dict[str, object]:
-        html_content = await get_html_content(url=self.url, core=self.core)
+        html_content = await get_html_content(url=self.url, core=self.core, owner=self)
         data: dict = await asyncio.to_thread(self._extract_html, html_content)
         m3u8_url = data.get("m3u8_url")
         if not isinstance(m3u8_url, str):
@@ -106,10 +77,10 @@ class Video(BaseMedia):
             data["m3u8_base_url"] = None
         else:
             try:
-                stuff = await get_html_content(core=self.core, url=m3u8_url)
+                stuff = await get_html_content(core=self.core, url=m3u8_url, owner=self)
                 data["m3u8_base_url"] = self.get_m3u8_base_url(stuff)
             except Exception as e:
-                logger.warning("Failed to fetch or build master m3u8 for %s: %s", self.url, e)
+                logger.warning("Failed to fetch or build master m3u8 for %s: %s", self.url, e, exc_info=True)
                 data["m3u8_base_url"] = None
         return data
 
@@ -123,7 +94,7 @@ class Video(BaseMedia):
                     if isinstance(obj, dict):
                         return obj
                 except Exception as e:
-                    logger.warning("Failed to decode playervars JSON for %s: %s", self.url, e)
+                    logger.warning("Failed to decode playervars JSON for %s: %s", self.url, e, exc_info=True)
 
         match = re.search(r"mediaDefinitions?\s*:\s*(\[)", html_content)
         if match:
@@ -132,7 +103,7 @@ class Video(BaseMedia):
                 if isinstance(arr, list):
                     return {"mediaDefinitions": arr}
             except Exception as e:
-                logger.warning("Failed to decode mediaDefinitions for %s: %s", self.url, e)
+                logger.warning("Failed to decode mediaDefinitions for %s: %s", self.url, e, exc_info=True)
 
         return {}
 
@@ -169,7 +140,7 @@ class Video(BaseMedia):
                 elif isinstance(ld_data, dict) and ld_data.get("@type") == "VideoObject":
                     video_obj = ld_data
             except Exception as e:
-                logger.warning("Failed to parse application/ld+json for %s: %s", self.url, e)
+                logger.warning("Failed to parse application/ld+json for %s: %s", self.url, e, exc_info=True)
 
         # Video ID
         video_id = None
@@ -309,7 +280,7 @@ class Video(BaseMedia):
                     if isinstance(arr, list):
                         media_definitions = arr
                 except Exception as e:
-                    logger.warning("Failed to decode mediaDefinitions for %s: %s", self.url, e)
+                    logger.warning("Failed to decode mediaDefinitions for %s: %s", self.url, e, exc_info=True)
         if not media_definitions:
             logger.warning("No media definitions found for %s", self.url)
 
@@ -344,23 +315,9 @@ class Video(BaseMedia):
         """Convenience property to quickly get the main HLS adaptive stream path."""
         return build_m3u8_master(stuff)
 
+    @download_errors(DownloadFailed)
     async def download(self, configuration: DownloadConfigHLS) -> bool | DownloadReport:
-        try:
-            await self.load_fields("title", "m3u8_base_url")
-            if not self.m3u8_base_url:
-                raise DownloadFailed(f"Cannot download video without m3u8_base_url: {self.url}")
-            config = copy.deepcopy(configuration)
-            config.m3u8_base_url = self.m3u8_base_url
-
-            if not config.no_title:
-                config.path = os.path.join(config.path, f"{self.title}.mp4")
-
-            return await self.core.download(config)
-        except DownloadCancelled:
-            raise
-        except Exception as e:
-            logger.exception("Download failed for %s: %s", self.url, e)
-            raise DownloadFailed(f"Download failed for {self.url}: {e}") from e
+        return await download_hls(self, configuration)
 
 
 @dataclass(kw_only=True, slots=True)
@@ -377,7 +334,7 @@ class Playlist(BaseMedia):
     loader_methods: ClassVar[dict[str, str]] = {"html": "_load_html"}
 
     async def _load_html(self) -> dict[str, object]:
-        html_content = await get_html_content(url=self.url, core=self.core)
+        html_content = await get_html_content(url=self.url, core=self.core, owner=self)
         return await asyncio.to_thread(self._extract_html, html_content)
 
     @staticmethod
@@ -433,7 +390,7 @@ class UserHelper(BaseMedia):
     )
 
     async def _load_html(self) -> dict[str, object]:
-        html_content = await get_html_content(core=self.core, url=self.url)
+        html_content = await get_html_content(core=self.core, url=self.url, owner=self)
         return await asyncio.to_thread(self._extract_html, html_content)
 
     def _extract_html(self, html_content: str) -> dict[str, object]:
