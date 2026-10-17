@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re
+from functools import partial
 import json
 import asyncio
 import logging
@@ -7,6 +8,8 @@ import argparse
 import urllib.parse
 
 from thumbzilla_api.modules import errors as provider_errors
+from base_api import update_url_query
+from base_api import profile_base_url
 from base_api.modules.provider import fetch_content, download_errors, download_hls
 from base_api.modules.logger import configure_app_logging, get_logger
 
@@ -358,19 +361,23 @@ class Playlist(BaseMedia):
         }
 
     def get_videos(self, pages: int = 2, iterator_config: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult[Video], None]:
-        url = self.url
-        page_urls = [f"{url}&page={page}" for page in range(1, pages + 1)]
+        url = self.resolved_url or self.url
+        page_urls = [update_url_query(url, page=page) for page in range(1, pages + 1)]
         return scrape_stream(
             core=self.core,
             constructor=Video,
             target_page_urls=page_urls,
-            item_extractor=extractor_search,
+            item_extractor=partial(extractor_search, base_url=url),
             iterator_config=iterator_config,
         )
 
 
 @dataclass(kw_only=True, slots=True)
 class UserHelper(BaseMedia):
+
+    def __post_init__(self):
+        profile_base_url(self.url, depth=2)
+
     url: str
     core: BaseCore
     name: str | None = media_field("html")
@@ -479,14 +486,13 @@ class UserHelper(BaseMedia):
         config = iterator_config or iterator_configuration
         if config is None:
             config = make_iterator_config()
-        url = self.url
-        sep = "&" if "?" in url else "?"
-        page_urls = [f"{url}{sep}page={page}" for page in range(1, pages + 1)]
+        url = self.resolved_url or self.url
+        page_urls = [update_url_query(url, page=page) for page in range(1, pages + 1)]
         return scrape_stream(
             core=self.core,
             constructor=Video,
             target_page_urls=page_urls,
-            item_extractor=extractor_search,
+            item_extractor=partial(extractor_search, base_url=url),
             iterator_config=config,
         )
 
