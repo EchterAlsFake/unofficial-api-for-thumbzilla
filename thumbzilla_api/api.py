@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from curl_cffi import AsyncSession
 from typing import AsyncGenerator, ClassVar
 from selectolax.lexbor import LexborHTMLParser
-from base_api.modules.config import IteratorConfig
+from base_api.modules.config import IteratorConfig, RuntimeConfig
 from base_api.modules.type_hints import DownloadReport
 from base_api import (BaseCore, BaseMedia, DownloadConfigHLS, ErrorAction, ErrorMode, Helper,
     MediaLoadError, MediaLoadErrors, ScrapeErrorContext, ScrapeResult, media_field,
@@ -344,12 +344,17 @@ class Playlist(BaseMedia):
     def _extract_html(html_content: str) -> dict:
         parser = LexborHTMLParser(html_content)
 
-        title = parser.css_first("h1#playlist_title").text(strip=True)
-        author_name = parser.css_first("p.playlist_desc").css_first("a").text(strip=True)
-        rating_percent = parser.css_first("div.rating_percent.js_rating_percent").text(strip=True)
-        rating_count = parser.css_first("span.playlist_stats_value").text(strip=True)
-        views = parser.css("span.playlist_stats_value")[1].text(strip=True)
-        video_count = parser.css("span.playlist_stats_value")[2].text(strip=True)
+        def text(selector):
+            node = parser.css_first(selector)
+            return node.text(strip=True) if node else None
+
+        title = text("h1#playlist_title")
+        author_name = text("p.playlist_desc a")
+        rating_percent = text("div.rating_percent.js_rating_percent")
+        stats = [node.text(strip=True) for node in parser.css("span.playlist_stats_value")]
+        rating_count = stats[0] if stats else None
+        views = stats[1] if len(stats) > 1 else None
+        video_count = stats[2] if len(stats) > 2 else None
 
         return {
             "title": title,
@@ -621,7 +626,8 @@ class Client:
             iterator_config: IteratorConfig | None = None,
             iterator_configuration: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult[Video], None]:
         config = iterator_config or iterator_configuration
-        page_urls = [f"https://thumbzilla.com/search/?query={query}&page={page}" for page in range(1, pages + 1)]
+        page_urls = [update_url_query("https://www.thumbzilla.com/search/", query=query, page=page)
+                     for page in range(1, pages + 1)]
         return scrape_stream(
             core=self.core,
             constructor=Video,
@@ -660,18 +666,21 @@ async def run_main(args_list: list[str] | None = None):
         parser.print_help()
         return
 
-    client = Client()
-    for url in urls:
-        print(f"Fetching video information for: {url}")
-        try:
-            video = await client.get_video(url, load_html=True)
-            title = getattr(video, "title", None) or url
-            print(f"Starting download for: {title}")
-            await video.download(configuration=config)
-            print(f"Download complete: {title}")
-        except Exception as e:
-            logger.exception("CLI failed while processing %s", url)
-            print(f"Error downloading {url}: {e}")
+    async with BaseCore(RuntimeConfig()) as core:
+        client = Client(core=core)
+        for url in urls:
+            print(f"Fetching video information for: {url}")
+            try:
+                video = await client.get_video(url, load_html=True)
+                title = getattr(video, "title", None) or url
+                print(f"Starting download for: {title}")
+                result = await video.download(configuration=config)
+                if result is False or getattr(result, "status", None) == "failed":
+                    raise DownloadFailed("Download did not complete")
+                print(f"Download complete: {title}")
+            except Exception as e:
+                logger.exception("CLI failed while processing %s", url)
+                print(f"Error downloading {url}: {e}")
 
 
 def main():
