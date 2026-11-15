@@ -1,3 +1,18 @@
+# 2.0.0
+
+Release 2.0.0
+
+Update pagination handling, validation, and documentation.
+
+Changes since 1.4.3:
+
+```text
+README.md             | 24 ++++++++++++-
+ pyproject.toml        |  4 +--
+ thumbzilla_api/api.py | 98 +++++++++++++++++++++++++++++++++++++++++----------
+ 3 files changed, 105 insertions(+), 21 deletions(-)
+```
+
 # Changelog
 
 ## 1.4.3 — 2026-10-27

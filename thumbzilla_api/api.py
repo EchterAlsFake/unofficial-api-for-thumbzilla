@@ -1,4 +1,7 @@
 from __future__ import annotations
+
+from base_api import paginated_stream, PageInfo, validate_pagination
+from base_api.modules.pagination import linked_page
 import re
 from functools import partial
 import json
@@ -349,6 +352,8 @@ class Playlist(BaseMedia):
             return node.text(strip=True) if node else None
 
         title = text("h1#playlist_title")
+        if title is None:
+            raise NotFound("The response does not expose a Thumbzilla playlist")
         author_name = text("p.playlist_desc a")
         rating_percent = text("div.rating_percent.js_rating_percent")
         stats = [node.text(strip=True) for node in parser.css("span.playlist_stats_value")]
@@ -365,15 +370,33 @@ class Playlist(BaseMedia):
             "videos_count": video_count
         }
 
-    def get_videos(self, pages: int = 2, iterator_config: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult[Video], None]:
+    def get_videos(
+        self,
+        pages: int | str = 1,
+        iterator_config: IteratorConfig | None = None,
+        *,
+        start_page: int = 1,
+    ) -> AsyncGenerator[ScrapeResult[Video], None]:
+        validate_pagination(pages, start_page)
         url = self.resolved_url or self.url
-        page_urls = [update_url_query(url, page=page) for page in range(1, pages + 1)]
-        return scrape_stream(
+        page_url = lambda page: update_url_query(url, page=page)
+
+        def playlist_items(content):
+            if LexborHTMLParser(content).css_first("h1#playlist_title") is None:
+                raise NotFound("The response does not expose a Thumbzilla playlist")
+            return extractor_search(content, base_url=url)
+
+        return paginated_stream(
             core=self.core,
             constructor=Video,
-            target_page_urls=page_urls,
-            item_extractor=partial(extractor_search, base_url=url),
+            item_extractor=playlist_items,
             iterator_config=iterator_config,
+            page_url=page_url,
+            pages=pages,
+            start_page=start_page,
+            page_info=lambda content, page, rows: _pagination_info(
+                content, page, rows, page_url=page_url
+            ),
         )
 
 
@@ -484,21 +507,29 @@ class UserHelper(BaseMedia):
 
     def get_videos(
         self,
-        pages: int = 2,
+        pages: int | str = 1,
         iterator_config: IteratorConfig | None = None,
         iterator_configuration: IteratorConfig | None = None,
+        *,
+        start_page: int = 1,
     ) -> AsyncGenerator[ScrapeResult[Video], None]:
+        validate_pagination(pages, start_page)
         config = iterator_config or iterator_configuration
         if config is None:
             config = make_iterator_config()
         url = self.resolved_url or self.url
-        page_urls = [update_url_query(url, page=page) for page in range(1, pages + 1)]
-        return scrape_stream(
+        page_url = lambda page: update_url_query(url, page=page)
+        return paginated_stream(
             core=self.core,
             constructor=Video,
-            target_page_urls=page_urls,
             item_extractor=partial(extractor_search, base_url=url),
             iterator_config=config,
+            page_url=page_url,
+            pages=pages,
+            start_page=start_page,
+            page_info=lambda content, page, rows: _pagination_info(
+                content, page, rows, page_url=page_url
+            ),
         )
 
 
@@ -620,22 +651,52 @@ class Client:
         return amateur
 
     def search(
-            self,
-            query: str,
-            pages: int = 2,
-            iterator_config: IteratorConfig | None = None,
-            iterator_configuration: IteratorConfig | None = None) -> AsyncGenerator[ScrapeResult[Video], None]:
+        self,
+        query: str,
+        pages: int | str = 1,
+        iterator_config: IteratorConfig | None = None,
+        iterator_configuration: IteratorConfig | None = None,
+        *,
+        start_page: int = 1,
+    ) -> AsyncGenerator[ScrapeResult[Video], None]:
+        validate_pagination(pages, start_page)
         config = iterator_config or iterator_configuration
-        page_urls = [update_url_query("https://www.thumbzilla.com/search/", query=query, page=page)
-                     for page in range(1, pages + 1)]
-        return scrape_stream(
+        page_url = lambda page: update_url_query(
+            "https://www.thumbzilla.com/search/", query=query, page=page
+        )
+        return paginated_stream(
             core=self.core,
             constructor=Video,
-            target_page_urls=page_urls,
             item_extractor=extractor_search,
             iterator_config=config,
+            page_url=page_url,
+            pages=pages,
+            start_page=start_page,
+            page_info=lambda content, page, rows: _pagination_info(
+                content, page, rows, page_url=page_url
+            ),
         )
 
+
+def _pagination_info(content, page, rows, *, page_url):
+    info = linked_page(content, page, rows, page_url=page_url)
+    # The live source repeats all 20 cards on pages 66 and 67 of some
+    # channels, then continues with different cards. Its canonical URL
+    # confirms that these are distinct source pages rather than a reset.
+    from dataclasses import replace
+    from urllib.parse import parse_qs, urlsplit
+    from base_api.modules.urls import same_site_url
+
+    canonical = LexborHTMLParser(content).css_first('link[rel="canonical"][href]')
+    if canonical is not None:
+        target = canonical.attributes["href"]
+        requested = page_url(page)
+        if same_site_url(target, requested) and urlsplit(target).path.rstrip(
+            "/"
+        ) == urlsplit(requested).path.rstrip("/"):
+            current = int(parse_qs(urlsplit(target).query).get("page", ["1"])[0])
+            info = replace(info, current_page=current)
+    return info
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -693,3 +754,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

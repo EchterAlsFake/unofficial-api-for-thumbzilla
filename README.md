@@ -24,7 +24,7 @@
 |---|---|
 | **Video Fetching** | Fetch video objects with metadata scraped directly from HTML |
 | **Video Downloading** | HLS-based downloading with configurable quality (`best`, `half`, `worst`, or specific resolutions) |
-| **Playlist Fetching** | Fetch playlist details and get playlist videos |
+| **Playlist Fetching** | Legacy interface retained; current public playlist route and pagination remain unverified |
 | **User Profiles** | Fetch user profile details and their uploaded videos |
 | **Pornstar & Channel Profiles** | Fetch model/pornstar/amateur/channel profiles and uploaded videos |
 | **Video Search** | Search videos by query with support for pagination |
@@ -136,3 +136,25 @@ This API is licensed under the AGPLv3. See the `LICENSE` file for details.
 > If you want to use this API without open-sourcing your own code, you must purchase a commercial license.
 > 
 > **For commercial licensing, contact:** EchterAlsFakeBS@proton.me
+
+## Pagination contract (2.0.0)
+
+Listing methods accept `pages=1` and `start_page=1`. Page numbers are one-based
+in the public API, including sites whose URLs use zero-based indexes.
+`pages=N` consumes at most N source pages; `pages="all"` follows verified
+navigation to exhaustion. Zero, negative numbers, booleans, fractions and numeric
+strings are rejected. A requested page limit is not proof that the source ended.
+
+Use `iterator_config=IteratorConfig(order="original", load_specific_sources=())`
+to enumerate listing identities without loading every detail page. Request and
+parser failures remain visible. Close partially consumed streams with `aclosing`
+(or `async with` for `ScrapeStream`). Source ordering can be selected explicitly
+through `IteratorConfig`. These changes require `eaf-base-api>=4.3.0`.
+
+Live verification found a site limit on large channels: page 100 links to page
+101, which returns HTTP 404. Such a scan raises (or yields a visible error) and
+must not be treated as complete. Some distinct indexed pages contain duplicate
+cards; source order is preserved, and callers may deduplicate stable video IDs.
+The legacy `Playlist` interface is retained, but no working current public
+Thumbzilla playlist URL was found. Playlist pagination remains unverified;
+missing playlist markup raises instead of returning unrelated videos.
